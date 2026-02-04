@@ -1,0 +1,244 @@
+with dias_validos as (
+  select distinct dp.dat_dia::date as dia_ref
+  from dax_share_investimentos.dim_periodo_investimentos dp
+  where dp.flg_util = 1
+    and dp.dat_dia between date '2024-01-01' and current_date
+),
+ultimas_datas as (
+  select
+    a.dat_reference::date as dia_ref,
+    a.idt_financial_service,
+    max(a.dat_reference) as ultima_data
+  from dax_share_dax.analytical_customer_transactions  a
+  join dias_validos d on a.dat_reference::date = d.dia_ref
+  where a.idt_financial_service in (21053,21063,21083,21073,21093,21096)
+  group by 1, 2
+)
+
+-- Query principal
+select * from (
+
+  -- 1. AuC_Posicao
+  select
+    a.dat_reference::date as dia_ref,
+    '${semana}' as semana,
+    case
+      when a.idt_financial_service = 21053 then 'CDB AuC Posição'
+      when a.idt_financial_service = 21063 then 'Tesouro Direto'
+      when a.idt_financial_service = 21083 then 'Fundos de Investimentos'
+      when a.idt_financial_service = 21073 then 'Renda Variável'
+      when a.idt_financial_service = 21093 then 'RF3 - Emissão Bancária de Terceiros'
+      when a.idt_financial_service = 21096 then 'Compromissada'
+      else 'outros'
+    end as Produto,
+    'AuC_Posicao' as Indicador,
+    sum(a.num_transaction_value) as Valor
+  from dax_share_dax.analytical_customer_transactions a
+  join ultimas_datas u
+    on a.dat_reference::date = u.dia_ref
+   and a.dat_reference = u.ultima_data
+   and a.idt_financial_service = u.idt_financial_service
+  where a.dat_reference >= '2024-01-01'
+  group by 1, 2, 3, 4
+
+  union all
+
+  -- 2. Clientes
+  select
+    a.dat_reference::date as dia_ref,
+    '${semana}' as semana,
+    case 
+      when a.idt_financial_service = 21053 then 'CDB AuC Posição'
+      when a.idt_financial_service = 21063 then 'Tesouro Direto'
+      when a.idt_financial_service = 21083 then 'Fundos de Investimentos'
+      when a.idt_financial_service = 21073 then 'Renda Variável'
+      when a.idt_financial_service = 21093 then 'RF3 - Emissão Bancária de Terceiros'
+      when a.idt_financial_service = 21096 then 'Compromissada'
+      else 'outros'
+    end as Produto,
+    'Clientes' as Indicador,
+    count(distinct a.cod_customer) as Valor
+  from dax_share_dax.analytical_customer_transactions  a
+  join ultimas_datas u
+    on a.dat_reference::date = u.dia_ref
+   and a.idt_financial_service = u.idt_financial_service
+   and a.dat_reference = u.ultima_data
+  where a.dat_reference >= '2024-01-01'
+  group by 1, 2, 3, 4
+
+  union all
+
+  -- 3. AuC_Medio (agora média diária no próprio dia, então basicamente igual ao valor)
+(
+select
+DATE_TRUNC('month', dat_reference) AS mes_ref,
+    --dam.dat_reference AS dia_ref,
+   '%{semana}' AS semana,
+    CASE
+        WHEN idt_financial_service IN (21053) THEN 'CDB AuC Posição'
+        WHEN idt_financial_service IN (21063) THEN 'Tesouro Direto'
+        WHEN idt_financial_service IN (21083) THEN 'Fundos de Investimentos'
+        WHEN idt_financial_service IN (21073) THEN 'Renda Variável'
+        WHEN idt_financial_service IN (21093) THEN 'RF3 - Emissão Bancária de Terceiros'
+        WHEN idt_financial_service IN (21096) THEN 'Compromissada'
+        ELSE 'outros'
+    END AS Produto,
+    'AUC_Medio' AS Indicador,
+    ROUND(
+        SUM(num_transaction_value) / COUNT(DISTINCT DATE_PART('day', dam.dat_reference)),
+        2) AS Valor
+FROM dax_share_dax.analytical_customer_transactions dam
+JOIN dax_share_investimentos.dim_periodo_investimentos dp
+    ON dp.dat_dia = dam.dat_reference
+   AND dp.flg_util = 1
+WHERE dam.dat_reference >= '2024-01-01'
+  AND idt_financial_service IN (21053, 21063, 21083, 21073, 21093, 21096)
+GROUP BY 1, 2, 3, 4
+ORDER BY 1, 3
+)
+
+  union all
+
+  -- 4. Resgate
+  select
+    dat_reference::date as dia_ref,
+    '${semana}' as semana,
+    case
+      when idt_financial_service = 21052 then 'CDB AuC Posição'
+      when idt_financial_service = 21062 then 'Tesouro Direto'
+      when idt_financial_service = 21082 then 'Fundos de Investimentos'
+      when idt_financial_service = 21072 then 'Renda Variável'
+      when idt_financial_service = 21092 then 'RF3 - Emissão Bancária de Terceiros'
+      when idt_financial_service = 21095 then 'Compromissada'
+      else 'outros'
+    end as Produto,
+    'Resgate' as Indicador,
+    sum(num_transaction_value) as Valor
+  from dax_share_dax.analytical_customer_transactions 
+  where dat_reference::date >= '2024-01-01'
+    and idt_financial_service in (21052,21062,21082,21072,21092,21095)
+  group by 1, 2, 3, 4
+
+  union all
+
+  -- 5. Aplicacao
+  select
+    dat_reference::date as dia_ref,
+    '${semana}' as semana,
+    case
+      when idt_financial_service = 21051 then 'CDB AuC Posição'
+      when idt_financial_service = 21061 then 'Tesouro Direto'
+      when idt_financial_service = 21081 then 'Fundos de Investimentos'
+      when idt_financial_service = 21071 then 'Renda Variável'
+      when idt_financial_service = 21091 then 'RF3 - Emissão Bancária de Terceiros'
+      when idt_financial_service = 21094 then 'Compromissada'
+      else 'outros'
+    end as Produto,
+    'Aplicacao' as Indicador,
+    sum(num_transaction_value) as Valor
+  from dax_share_dax.analytical_customer_transactions 
+  where dat_reference::date >= '2024-01-01' 
+    and idt_financial_service in (21051,21061,21081,21071,21091,21094)
+  group by 1, 2, 3, 4
+
+  union all
+
+-- tabela invest
+
+select
+	 a.dt_hr_operacao::date as dia_ref,
+    '${semana}' as semana,
+	CASE
+    WHEN papel IN ('CDB AB T2', 'CDB AB T1', 'CDB ESC 5', 'CDB ESC 6', 'CDB ESC 13') THEN produto || ' Turbinado'
+    WHEN papel IN ('CDB ESC 9', 'CDB ESC 8', 'CDB ESC 7', 'CDB ESC 11', 'CDB ESC 10', 'CDB ESC 12') THEN 'CDB Retenção'
+    WHEN DESCRICAO LIKE '%CDB Cofrinho%' THEN 'cofrinho'
+    WHEN papel ILIKE '%AA%' THEN 'Poupar Automático'
+    WHEN LIQUIDEZ = 1 AND percentual_cdi >= 120 THEN 'HY'
+    WHEN LIQUIDEZ = 1 THEN 'CDB LD'
+    ELSE 'CDB SLD'
+END AS TIPO_PRODUTO,
+	case when a.tipo_operacao = 1 then 'Aplicacao'
+	     when a.tipo_operacao = 4 then 'Cancelada'
+	else 'Resgate' 	
+	end as Indicador,
+	sum(a.valor_operacao) as Valor
+from dax_share_investimentos.movement_cdb a
+where idt_order_status  = 2
+and customer_id not in (select distinct cod_customer_id from dax_share_dax_mdm.ids_intercompany ii)
+and a.dt_hr_operacao::date >= '2024-01-01'
+group by 1,2,3,4
+
+union all
+
+  -- 6. Cliente Posição
+  select
+    u.dia_ref,
+    '${semana}' as semana,
+    'Ativo Investimento Posicao' as Produto,
+    'Cliente_posicao' as Indicador,
+    count(distinct a.cod_customer) as Valor
+  from dax_share_dax.analytical_customer_transactions  a
+  join ultimas_datas u on a.dat_reference = u.ultima_data
+    and a.idt_financial_service = u.idt_financial_service
+  group by 1, 2, 3, 4
+
+  union all
+
+  -- 7. Cofrinho / Poupar
+ -- Cofrinho e Poupar Automático (versão validada)
+select
+    a.dt_hr_operacao::date as dia_ref,
+    '${semana}' as semana,
+   	case when a.papel ILIKE ('%AA%') then 'CDB Poupar Automatico'
+	     when a.papel like 'CDB COFR%' or a.papel in ('CDB CFFID1','CDB CFFID2') then 'CDB Cofrinho'
+	     when a.produto in ('CDB 130%') and a.tipo_liquidez = 1 then'CDB 130'
+	else 'Outros'
+    end as Produto,
+    case
+        when a.tipo_operacao = 1 then 'Aplicacao'
+        when a.tipo_operacao = 4 then 'Cancelada'
+        else 'Resgate'
+    end as Indicador,
+    sum(a.valor_operacao) as Valor
+from dax_share_investimentos.movement_cdb a
+where a.idt_order_status = 2
+  and not exists (
+    select 1
+    from dax_share_dax_mdm.ids_intercompany b
+    where b.cod_customer_id = a.customer_id
+  )
+  and a.dt_hr_operacao::date >= date '2024-01-01'
+group by 1, 2, 3, 4
+
+  union all
+
+  -- 8. Liquidez Diária / Longo Prazo
+   select
+    a.dt_hr_operacao::date as dia_ref,
+    '${semana}' as semana,
+    case 
+      when a.tipo_liquidez = 1 then 'CDB Liquidez Diaria'
+       when a.tipo_liquidez = 2 then 'CDB Longo Prazo'
+		 when a.tipo_liquidez = 3 then 'CDB Longo Prazo'
+      else 'Outros'
+    end as Produto,
+    case 
+      when a.tipo_operacao = 1 then 'Aplicacao'
+      when a.tipo_operacao = 4 then 'Cancelada'
+      else 'Resgate'
+    end as Indicador,
+    sum(a.valor_operacao) as Valor
+  from dax_share_investimentos.movement_cdb a
+  where a.idt_order_status = 2
+    and a.customer_id not in (
+      select distinct cod_customer_id from dax_share_dax_mdm.ids_intercompany
+    )
+    AND NOT (
+        a.papel ILIKE '%AA%'  -- Poupar Automático
+        OR a.papel LIKE 'CDB COFR%' 
+        OR a.papel IN ('CDB CFFID1','CDB CFFID2') -- Cofrinho
+        OR (a.produto LIKE 'CDB 130%' AND a.tipo_liquidez = 1) -- CDB 130
+  )
+    and a.dt_hr_operacao::date >= '2024-01-01'
+  group by 1, 2, 3, 4
+) as Final
